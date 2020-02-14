@@ -1,0 +1,2 @@
+brew reinstall --build-from-source riscv-gcc
+https://www.reddit.com/r/olkb/comments/ehto0j/dyld_library_not_loaded_error/
