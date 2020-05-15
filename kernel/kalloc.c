@@ -27,6 +27,8 @@ void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  // this will give some free pages that the kernel can start using
+  // prior to this, the kernel has no memory
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -34,6 +36,7 @@ void
 freerange(void *pa_start, void *pa_end)
 {
   char *p;
+  // lowest address of page is stored as p, it points to a byte
   p = (char*)PGROUNDUP((uint64)pa_start);
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
     kfree(p);
@@ -54,6 +57,9 @@ kfree(void *pa)
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
+  // store the run at the begining of the page
+  // r is not initialized yet so this is fine.
+  // 64-bit address = 64-bit address;
   r = (struct run*)pa;
 
   acquire(&kmem.lock);

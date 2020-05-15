@@ -323,6 +323,7 @@ sfence_vma()
 #define PGSIZE 4096 // bytes per page
 #define PGSHIFT 12  // bits of offset within a page
 
+// if sz = 5023, this evaluates to 8192
 #define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1))
 #define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))
 
@@ -333,8 +334,11 @@ sfence_vma()
 #define PTE_U (1L << 4) // 1 -> user can access
 
 // shift a physical address to the right place for a PTE.
+// remove the 12-bit offset and make place for flags
 #define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)
 
+// 10 to remove flags from PTE
+// 12 to make place for 12-bits offset
 #define PTE2PA(pte) (((pte) >> 10) << 12)
 
 #define PTE_FLAGS(pte) ((pte) & 0x3FF)
@@ -350,5 +354,7 @@ sfence_vma()
 // that have the high bit set.
 #define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
 
+// a 64-bit physical address
 typedef uint64 pte_t;
+// a pointer to a uint64
 typedef uint64 *pagetable_t; // 512 PTEs

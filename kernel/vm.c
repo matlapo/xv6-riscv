@@ -25,6 +25,7 @@ void print(pagetable_t);
 void
 kvminit()
 {
+  // allocate a page for storing kernel root page table
   kernel_pagetable = (pagetable_t) kalloc();
   memset(kernel_pagetable, 0, PGSIZE);
 
@@ -75,6 +76,16 @@ kvminithart()
 //   21..39 -- 9 bits of level-1 index.
 //   12..20 -- 9 bits of level-0 index.
 //    0..12 -- 12 bits of byte offset within the page.
+
+// If the PTE found using va results in not having
+// a complete mapping, the necessay PTEs in each
+// table of the chain will be added to make this
+// virtual address valid.
+// e.g. if va maps to the 245th PTE in the PT at
+// level = 2, then a new PT page will be allocated
+// and the 245th PTE will now point to it.
+// so alloc != 0 will ensure that there is a complete
+// path from level = 2 to level = 0.
 static pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
@@ -82,16 +93,25 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
     panic("walk");
 
   for(int level = 2; level > 0; level--) {
+    // get a pointer to the pte found by using the
+    // 9 bits at the corresponding level.
     pte_t *pte = &pagetable[PX(level, va)];
     if(*pte & PTE_V) {
+      // get the address of the 0th PTE in next table
       pagetable = (pagetable_t)PTE2PA(*pte);
     } else {
+      // the required page hasn't been allocated
       if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)
         return 0;
       memset(pagetable, 0, PGSIZE);
+      // pagetable holds the address of the 4096-bit page,
+      // since PTEs are page-aligned, we can remove the 
+      // 12-bit offset and make this PTE point to this page.
+      // also make the PTE valid.
       *pte = PA2PTE(pagetable) | PTE_V;
     }
   }
+  // we've reached level == 0
   return &pagetable[PX(0, va)];
 }
 
