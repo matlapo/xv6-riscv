@@ -99,6 +99,7 @@ kvminithart()
 // path from level = 2 to level = 0.
 
 // the provided pagetable need not to be a valid PT.
+// (i.e it could be an empty page)
 static pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
@@ -113,7 +114,7 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
       // get the address of the PT pointed by pte
       pagetable = (pagetable_t)PTE2PA(*pte);
     } else {
-      // the required page hasn't been allocated
+      // the required page hasn't been allocated, so allocate it.
       if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)
         // the page could not be allocated
         return 0;
@@ -123,10 +124,14 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
       // since PTEs are page-aligned, we can remove the 
       // 12-bit offset and make this PTE point to this page.
       // also make the PTE valid.
+      // pagetable is the address of the new PT page.
+      // i.e. *pte = PA2PTE(pa) | perm | PTE_V;
       *pte = PA2PTE(pagetable) | PTE_V;
     }
   }
-  // we've reached level = 0
+  // we've reached level = 0, the loop doesn't include level 0.
+  // walk only creates the necessary mappings, it is up to the caller
+  // to make the returned PTE point to a specific page obtained with kalloc.
   return &pagetable[PX(0, va)];
 }
 
@@ -193,19 +198,22 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   uint64 a, last;
   pte_t *pte;
 
-  // these 2 lines assumes direct mapping?
+  // virtual address of page (i.e first byte) of page containing va. 
   a = PGROUNDDOWN(va);
+  // virual address of last page.
   last = PGROUNDDOWN(va + size - 1);
   for(;;){
+    // install a PTE for page starting at virtual address va.
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
     if(*pte & PTE_V)
-      // no PTE created, but is already mapped.
+      // the returned pte already points to a valid page.
       panic("remap");
     // make the new PTE point to the page *containing* the physical address pa
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
       break;
+    // continue with next page.
     a += PGSIZE;
     pa += PGSIZE;
   }
@@ -305,12 +313,14 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
   oldsz = PGROUNDUP(oldsz);
   a = oldsz;
   for(; a < newsz; a += PGSIZE){
+    // allocate one page at a time, starting from address a.
     mem = kalloc();
     if(mem == 0){
-      // OOM
+      // OOM, deallocate all the pages we just allocated.
       uvmdealloc(pagetable, a, oldsz);
       return 0;
     }
+    // fill the pages with 0s.
     memset(mem, 0, PGSIZE);
     if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
       kfree(mem);
