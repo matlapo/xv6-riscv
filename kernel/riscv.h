@@ -324,6 +324,9 @@ sfence_vma()
 #define PGSHIFT 12  // bits of offset within a page
 
 // if sz = 5023, this evaluates to 8192
+// so if I need 7 bytes, PGROUNDUP tells me I need a full page.
+// it can also be treated as the vitual or physical address
+// of a page.
 #define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1))
 #define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))
 
@@ -341,6 +344,7 @@ sfence_vma()
 // 12 to make place for 12-bits offset
 #define PTE2PA(pte) (((pte) >> 10) << 12)
 
+// 0x3FF = 11 bits = all PTE flags
 #define PTE_FLAGS(pte) ((pte) & 0x3FF)
 
 // extract the three 9-bit page table indices from a virtual address.

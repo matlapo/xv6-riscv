@@ -5,7 +5,7 @@
 int main(int argc, char *argv[])
 {
   if (argc != 2) {
-    printf("sleep only accepts a single integer argument\n");
+    printf("usage: sleep milliseconds\n");
     exit(0);
   }
 

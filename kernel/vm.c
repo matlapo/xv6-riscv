@@ -29,6 +29,8 @@ kvminit()
   kernel_pagetable = (pagetable_t) kalloc();
   memset(kernel_pagetable, 0, PGSIZE);
 
+  // install all the translations that the kernel needs.
+
   // uart registers
   kvmmap(UART0, UART0, PGSIZE, PTE_R | PTE_W);
 
@@ -39,9 +41,11 @@ kvminit()
   kvmmap(VIRTION(1), VIRTION(1), PGSIZE, PTE_R | PTE_W);
 
   // CLINT
+  // 0x10000 = 16 * 4096
   kvmmap(CLINT, CLINT, 0x10000, PTE_R | PTE_W);
 
   // PLIC
+  // 0x400000 = 1024 * 4096
   kvmmap(PLIC, PLIC, 0x400000, PTE_R | PTE_W);
 
   // map kernel text executable and read-only.
@@ -60,8 +64,15 @@ kvminit()
 void
 kvminithart()
 {
+  // write the pa of the root page table into the satp register
   w_satp(MAKE_SATP(kernel_pagetable));
+  // flush the TLB
   sfence_vma();
+
+  // at this point, the CPU will translate addresses using the kernel
+  // PT, since the kernel uses an identity mapping the now virtual
+  // address of the next instruction will still correclty map to the
+  // right pa.
 }
 
 // Return the address of the PTE in page table pagetable
@@ -86,6 +97,8 @@ kvminithart()
 // and the 245th PTE will now point to it.
 // so alloc != 0 will ensure that there is a complete
 // path from level = 2 to level = 0.
+
+// the provided pagetable need not to be a valid PT.
 static pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
@@ -97,21 +110,23 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
     // 9 bits at the corresponding level.
     pte_t *pte = &pagetable[PX(level, va)];
     if(*pte & PTE_V) {
-      // get the address of the 0th PTE in next table
+      // get the address of the PT pointed by pte
       pagetable = (pagetable_t)PTE2PA(*pte);
     } else {
       // the required page hasn't been allocated
       if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)
+        // the page could not be allocated
         return 0;
+      // fill the new page with 0 (allocated in the if statement)
       memset(pagetable, 0, PGSIZE);
-      // pagetable holds the address of the 4096-bit page,
+      // pagetable holds the address of the 4096-byte page,
       // since PTEs are page-aligned, we can remove the 
       // 12-bit offset and make this PTE point to this page.
       // also make the PTE valid.
       *pte = PA2PTE(pagetable) | PTE_V;
     }
   }
-  // we've reached level == 0
+  // we've reached level = 0
   return &pagetable[PX(0, va)];
 }
 
@@ -178,13 +193,16 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   uint64 a, last;
   pte_t *pte;
 
+  // these 2 lines assumes direct mapping?
   a = PGROUNDDOWN(va);
   last = PGROUNDDOWN(va + size - 1);
   for(;;){
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
     if(*pte & PTE_V)
+      // no PTE created, but is already mapped.
       panic("remap");
+    // make the new PTE point to the page *containing* the physical address pa
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
       break;
@@ -197,6 +215,8 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 // Remove mappings from a page table. The mappings in
 // the given range must exist. Optionally free the
 // physical memory.
+// Looks like va must also be the base address (i.e lowest)
+// such that va..(va+size) is unmapped.
 void
 uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
 {
@@ -204,25 +224,39 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
   pte_t *pte;
   uint64 pa;
 
+  // a is still a virtual address, but it's the address of
+  // the first byte of the page containing va (all virtual at this point).
   a = PGROUNDDOWN(va);
   last = PGROUNDDOWN(va + size - 1);
   for(;;){
     if((pte = walk(pagetable, a, 0)) == 0)
+      // something wrong happened in walk, shouldn't happen. 
       panic("uvmunmap: walk");
     if((*pte & PTE_V) == 0){
+      // the virtual address is not mapped
       printf("va=%p pte=%p\n", a, *pte);
       panic("uvmunmap: not mapped");
     }
     if(PTE_FLAGS(*pte) == PTE_V)
+      // not sure when that would be the case
+      // but it's saying that it has to be a 
+      // pte that points to a "regular" page,
+      // not a PT page.
       panic("uvmunmap: not a leaf");
     if(do_free){
+      // get the physical address of the page and free it
       pa = PTE2PA(*pte);
       kfree((void*)pa);
     }
+    // only works if pte is a leaf, otherwise it breaks
+    // other va mappings. 
     *pte = 0;
     if(a == last)
       break;
+
+    // next page.
     a += PGSIZE;
+    // this statement is useless.
     pa += PGSIZE;
   }
 }
@@ -264,13 +298,16 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
   uint64 a;
 
   if(newsz < oldsz)
+    // already has enough memory.
     return oldsz;
 
+  // how many bytes used for oldsz (as a factor of PGSIZE).
   oldsz = PGROUNDUP(oldsz);
   a = oldsz;
   for(; a < newsz; a += PGSIZE){
     mem = kalloc();
     if(mem == 0){
+      // OOM
       uvmdealloc(pagetable, a, oldsz);
       return 0;
     }
@@ -294,8 +331,14 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
   if(newsz >= oldsz)
     return oldsz;
 
+  // new number of bytes (as a factor of PGSIZE) needed
   uint64 newup = PGROUNDUP(newsz);
+  // if it doesn't result in the same number of pages
   if(newup < PGROUNDUP(oldsz))
+    // newup is also the virtual address of the page
+    // that we want to keep.
+    // we want to delete every pages between
+    // newup and newup + (oldsz - newup).
     uvmunmap(pagetable, newup, oldsz - newup, 1);
 
   return newsz;

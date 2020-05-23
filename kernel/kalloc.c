@@ -23,6 +23,8 @@ struct {
   struct run *freelist;
 } kmem;
 
+// the allocator starts with no memory, the calls to kfree
+// give it some to manage.
 void
 kinit()
 {
@@ -62,6 +64,7 @@ kfree(void *pa)
   // 64-bit address = 64-bit address;
   r = (struct run*)pa;
 
+  // stores the run as the new head of the linked list.
   acquire(&kmem.lock);
   r->next = kmem.freelist;
   kmem.freelist = r;
