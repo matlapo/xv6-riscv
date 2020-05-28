@@ -1,5 +1,15 @@
 	#
         # code to switch between user and kernel space.
+        # 
+        # RISC-V hardware doesn't switch PT during a trap,
+        # so the user's address space must contain a page
+        # with the code to handle the trap (this file).
+        # stvec will point to this code, but it must be in memory.
+        # ALSO, the trap vector must write to satp to start using
+        # the kernel PT, but this implies that the vector instructions
+        # must be mapped at the same address in both the kernel and
+        # user PT, otherwise after switching the PT, the pc will point
+        # to somewhere else in physical memory and the kernel will crash. 
         #
         # this code is mapped at the same virtual address
         # (TRAMPOLINE) in user and kernel space so that

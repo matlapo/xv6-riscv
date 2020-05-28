@@ -44,6 +44,11 @@ usertrap(void)
   if((r_sstatus() & SSTATUS_SPP) != 0)
     panic("usertrap: not from user mode");
 
+  // note that at this point, this is the kernel executing
+  // but with the wrong stvec. So this small window could lead
+  // to problems, but RISC-V disables interrupts when a trap occurs
+  // and does not unable them again until set stvec happens.
+
   // send interrupts and exceptions to kerneltrap(),
   // since we're now in the kernel.
   w_stvec((uint64)kernelvec);
@@ -136,16 +141,23 @@ void
 kerneltrap()
 {
   int which_dev = 0;
+  // previous pc.
   uint64 sepc = r_sepc();
+  // contains SIE bit (whether device interupts were enabled, 0 = disabled).
+  // contains SPP bit (trap came from user or supervisor mode).
   uint64 sstatus = r_sstatus();
+  // reason for the trap.
   uint64 scause = r_scause();
-  
+
   if((sstatus & SSTATUS_SPP) == 0)
+    // previous mode was user mode (should never happen).
     panic("kerneltrap: not from supervisor mode");
   if(intr_get() != 0)
+    // checks if device interrupts are enabled or not.
     panic("kerneltrap: interrupts enabled");
 
   if((which_dev = devintr()) == 0){
+    // 0 means unrecognized.
     printf("scause %p (%s)\n", scause, scause_desc(scause));
     printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
     panic("kerneltrap");
@@ -153,6 +165,7 @@ kerneltrap()
 
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING)
+    // chapter 6
     yield();
 
   // the yield() may have caused some traps to occur,
@@ -180,8 +193,7 @@ devintr()
 {
   uint64 scause = r_scause();
 
-  if((scause & 0x8000000000000000L) &&
-     (scause & 0xff) == 9){
+  if((scause & 0x8000000000000000L) && (scause & 0xff) == 9){
     // this is a supervisor external interrupt, via PLIC.
 
     // irq indicates which device interrupted.

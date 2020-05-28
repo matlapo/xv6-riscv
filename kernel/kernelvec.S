@@ -83,6 +83,7 @@ kernelvec:
         addi sp, sp, 256
 
         // return to whatever we were doing in the kernel.
+        // copies sepc back to pc.
         sret
 
         #

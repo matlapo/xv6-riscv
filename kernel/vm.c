@@ -209,7 +209,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
     if(*pte & PTE_V)
       // the returned pte already points to a valid page.
       panic("remap");
-    // make the new PTE point to the page *containing* the physical address pa
+    // make the new PTE point to the page *containing* the physical address pa.
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
       break;
@@ -225,6 +225,11 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 // physical memory.
 // Looks like va must also be the base address (i.e lowest)
 // such that va..(va+size) is unmapped.
+// This function calls walk() to know which physical memory
+// pages are in the process' address space.
+// core idea: get the pte from PT and do this:
+// pa = PTE2PA(*pte);
+// kfree((void*)pa);
 void
 uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
 {
@@ -241,7 +246,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
       // something wrong happened in walk, shouldn't happen. 
       panic("uvmunmap: walk");
     if((*pte & PTE_V) == 0){
-      // the virtual address is not mapped
+      // the virtual address is not mapped.
       printf("va=%p pte=%p\n", a, *pte);
       panic("uvmunmap: not mapped");
     }
@@ -252,8 +257,8 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
       // not a PT page.
       panic("uvmunmap: not a leaf");
     if(do_free){
-      // get the physical address of the page and free it
-      pa = PTE2PA(*pte);
+      // get the physical address of the page and free it.
+      pa = PTE2PA(*pte); // locate the physical page.
       kfree((void*)pa);
     }
     // only works if pte is a leaf, otherwise it breaks
@@ -270,6 +275,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
 }
 
 // create an empty user page table.
+// it's only called to create a root page table for the new process image in exec.
 pagetable_t
 uvmcreate()
 {
